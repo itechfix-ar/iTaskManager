@@ -15,7 +15,7 @@
 <script>
 /* Puente: reemplaza google.script.run por fetch al /exec (doPost del script). Mismo código de pantalla que en Google. */
 (function () {
-  var OK_URL = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+  var OK_URL = /^https:\/\/script\.google\.com\/(a\/[\w.-]+\/)?macros\/s\/[\w-]+\/exec$/;
   function appUrl() {
     var u = String(window.WEB_APP || '').trim();
     try { var q = new URLSearchParams(location.search).get('app'); if (q && OK_URL.test(q)) localStorage.setItem('itm_app', q); } catch (e) {}
