@@ -681,6 +681,14 @@
   .trow .chk{margin:0 auto}
   .trow.p-alta{box-shadow:inset 4px 0 0 #dc2626} .trow.p-media{box-shadow:inset 4px 0 0 #f59e0b} .trow.p-baja{box-shadow:inset 4px 0 0 #16a34a}
   .trow .venc{color:#dc2626;font-weight:700}
+  .trow.picked{background:#eef2ff}
+  @media (max-width:640px){
+    .selbar>div{flex-wrap:wrap;gap:6px}
+    .selbar span{flex-basis:100%;padding:0 4px 2px}
+    .selbar button{flex:1;justify-content:center;padding:9px 6px}
+  }
+  .meopt{margin-top:12px} .meopt .l{margin-top:0}
+  .meopt .seg button{font-size:13px}
   .trow .cl{display:flex;align-items:center;gap:6px;flex-wrap:wrap} .trow .cl .badge{flex:none}
   @media (max-width:480px){ .htop{gap:6px} .htop .ibtn{width:34px;height:34px;min-width:34px} .htop h1{font-size:17px} .htop h1 img.logoimg{height:32px} }
   .trow .m1,.trow .m2{display:none}
@@ -908,6 +916,7 @@
   <span id="selTxt">0 seleccionadas</span>
   <button class="all" id="selAll">Todas</button>
   <button class="all" id="selNone">Ninguna</button>
+  <button class="send" id="selEdit" style="background:#fff;color:#0a0a0a">✏️ Editar</button>
   <button class="send" id="selProg" style="background:#16a34a"></button>
   <button class="send" id="selSend"></button>
 </div></div>
@@ -1123,7 +1132,7 @@ const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto'
 const DSEM = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'];
 const ES_DEMO = !(window.google && google.script && google.script.run);
 let ENTORNO = ''; try { ENTORNO = localStorage.getItem('tm_env') || ''; } catch (e) {}
-const WEB_VERSION = 'v1.8';
+const WEB_VERSION = 'v1.10';
 const LOGO_DEFECTO = 'https://itechgroup.com.ar/img/my-shop-logo-1623431478.jpg';
 const APP_WEB = 'trabajo';
 
@@ -1501,6 +1510,7 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const sw = el.closest('[data-id]'), id = sw && sw.dataset.id, act = el.dataset.act;
   if (sw && sw.dataset.swiped) { delete sw.dataset.swiped; return; }
+  if (selMode && el.closest('.trow') && ['open', 'next'].includes(act)) { toggleSel(id); return; }
   if (act === 'check') completar(id, el);
   else if (act === 'next') avanzar(id, el);
   else if (act === 'open') abrirFicha(id);
@@ -1825,7 +1835,8 @@ function pintarSelbar() {
   const n = Object.keys(seleccion).length;
   $('selbar').classList.toggle('hide', !(selMode && vista === 'vAgenda'));
   $('selTxt').textContent = n + (n === 1 ? ' seleccionada' : ' seleccionadas');
-  $('selSend').disabled = !n;
+  $('selSend').disabled = !n; $('selEdit').disabled = !n; $('selProg').disabled = !n;
+  $('selSend').classList.toggle('hide', !!ADMIN()); $('selProg').classList.toggle('hide', !!ADMIN());
 }
 $('btnSel').onclick = () => setSelMode(!selMode);
 $('selAll').onclick = () => { visibles().forEach(t => seleccion[t.id] = true); pintar(); };
@@ -2145,7 +2156,7 @@ function bvPrev() {
   const link = (DATA.bienvenida || {}).link || '(publicá la app para tener el link)';
   $('bvAsuPrev').textContent = bvVars($('bvAsunto').value, u);
   $('bvPrev').innerHTML = esc(bvVars($('bvTexto').value, u)) +
-    '<div class="bvbox"><b>🔐 TUS DATOS PARA ENTRAR</b><div>Usuario: <b style="display:inline;background:none;color:inherit;padding:0">' + esc(u.usuario) + '</b></div><div>Clave: <i>se genera al enviar</i></div><div>Link: ' + esc(link) + '</div></div>';
+    '<div class="bvbox"><b>🔐 TUS DATOS PARA ENTRAR</b><div>Usuario: <b style="display:inline;background:none;color:inherit;padding:0">' + esc(u.usuario) + '</b></div><div>Contraseña: <i>se genera al enviar</i></div><div>Link: ' + esc(link) + '</div></div>';
   const n = sel.length; $('bvGo').textContent = n ? '✉️ Enviar a ' + n + (n === 1 ? ' usuario' : ' usuarios') : 'Elegí a quién';
   $('bvGo').disabled = !n; $('bvTest').disabled = !n;
 }
@@ -3508,7 +3519,7 @@ function aplicarAdmin() {
   ['vChk', 'vListas', 'vMerc'].forEach(v => nav(v).classList.add('hide'));
   nav('vReu').classList.remove('hide'); nav('vConfig').classList.remove('hide');
   nav('vNueva').classList.toggle('hide', !PERM('crear_tareas'));
-  $('btnSel').classList.add('hide');
+  $('btnSel').classList.toggle('hide', !PERM('editar_tareas'));   // v1.9: el Admin también edita varias juntas
   $('btnAct').innerHTML = ic('x'); $('btnAct').title = 'Salir';
   $('btnAct').onclick = () => { if (confirmarDoble($('btnAct'), 'Tocá otra vez para salir')) salirPortal(); };
 }
@@ -3747,8 +3758,8 @@ function pintarTabla() {
   const pe = t => /alta/i.test(t.prioridad) ? '🔥' : /media/i.test(t.prioridad) ? '⚡' : /baja/i.test(t.prioridad) ? '🌿' : '';
   const vence = t => !t.fecha ? '<span class="tsub">Sin fecha</span>' : difDias(t.fecha) < 0 ? '<span class="venc">Venció ' + fechaCorta(t.fecha) + '</span>' : esc(fechaCorta(t.fecha)) + (t.hora ? ' ' + esc(t.hora) : '');
   const est = t => { const i = paso(t); return ['⏳ ', '🚧 ', '✅ '][i] + esc(PASO_TXT[i]); };
-  const filas = vs.map(t => '<div class="trow ' + prioClase(t.prioridad) + '" data-id="' + t.id + '">' +
-    '<div class="cchk"><button class="chk" data-act="check" title="Marcar lista">' + ic('check') + '</button></div>' +
+  const filas = vs.map(t => '<div class="trow ' + prioClase(t.prioridad) + (seleccion[t.id] ? ' picked' : '') + '" data-id="' + t.id + '">' +
+    '<div class="cchk">' + (selMode ? '<button class="chk box' + (seleccion[t.id] ? ' on' : '') + '" data-act="sel">' + ic('check') + '</button>' : '<button class="chk" data-act="check" title="Marcar lista">' + ic('check') + '</button>') + '</div>' +
     '<div class="td" data-act="open"><b>' + esc(t.desc) + '</b>' + (t.notas ? '<small>' + esc(t.notas) + '</small>' : '') + '</div>' +
     '<div class="cl" data-act="open">' + (t.local ? badge(area(t)) + ' ' + esc(t.local) : '<span class="tsub">General</span>') + (t.asignada && alta ? '<div class="tsub">👥 La hace el local</div>' : '') + '</div>' +
     '<div class="cp" data-act="open">' + pe(t) + ' ' + esc(t.prioridad || '') + '</div>' +
@@ -3937,6 +3948,50 @@ function tutoPrimeraVez() {
   setTimeout(() => { TUTO_I = 0; abrirTutorial(); }, 900);
 }
 
+
+/* ===================== v1.9 · Editar varias tareas juntas ===================== */
+let ME = {};
+function abrirEditarMasivo() {
+  const ids = Object.keys(seleccion).filter(id => { const t = buscar(id); return t && !t.reunion; });
+  if (!ids.length) return toast('Elegí tareas (los temas de reunión no se editan acá)');
+  ME = { fecha: null, fechaVal: DATA.hoy, hora: '', local: '', asignada: null, prioridad: '', estado: '' };
+  const segm = (k, ops) => '<div class="seg" data-me="' + k + '">' + ops.map(o => '<button type="button" data-v="' + esc(o[0]) + '" class="' + (String(ME[k] == null ? '' : ME[k]) === o[0] ? 'on' : '') + '">' + o[1] + '</button>').join('') + '</div>';
+  const pinta = () => {
+    $('accBody').innerHTML = '<div class="grab"></div><h3 style="margin:4px 0 2px">✏️ Editar ' + ids.length + ' tarea(s) juntas</h3><div class="hint" style="margin:0 0 4px">Lo que dejes en <b>No cambiar</b> queda como está.</div>' +
+      '<div class="meopt"><label class="l">📅 Vencimiento</label>' + segm('fecha', [['', 'No cambiar'], ['sin', 'Sin vencimiento'], ['con', 'Poner fecha']]) +
+      (ME.fecha === 'con' ? '<div class="row" style="margin-top:8px"><div><input type="date" id="meF" value="' + esc(ME.fechaVal) + '"></div><div><input type="time" id="meH" value="' + esc(ME.hora) + '" placeholder="Hora (opcional)"></div></div>' : '') + '</div>' +
+      '<div class="meopt"><label class="l">🏪 Local</label><select id="meL"><option value="">No cambiar</option>' + DATA.locales.map(l => '<option' + (ME.local === l ? ' selected' : '') + '>' + esc(l) + '</option>').join('') + '</select></div>' +
+      '<div class="meopt"><label class="l">👥 ¿Quién la hace?</label>' + segm('asignada', [['', 'No cambiar'], ['no', '🙋 La hago yo'], ['si', '👥 El local']]) +
+      '<div class="hint" style="display:block">"El local" = la ve en su app y le llega el aviso. Supervisión, Compras y RMA nunca pasan al local.</div></div>' +
+      '<div class="meopt"><label class="l">🔥 Prioridad</label>' + segm('prioridad', [['', 'No cambiar']].concat(DATA.prioridades.map(x => [x, x]))) + '</div>' +
+      '<div class="meopt"><label class="l">✅ Estado</label>' + segm('estado', [['', 'No cambiar']].concat(DATA.estados.map(x => [x, x]))) + '</div>' +
+      '<div class="row" style="margin-top:16px"><div><button class="btn sec w100" id="accCan" type="button">Cancelar</button></div><div><button class="btn ok w100" id="meGo" type="button">' + ic('save') + 'Aplicar a ' + ids.length + '</button></div></div>';
+    $('accBody').querySelectorAll('[data-me]').forEach(g => g.onclick = e => {
+      const b = e.target.closest('button[data-v]'); if (!b) return; const k = g.dataset.me;
+      if ($('meF')) ME.fechaVal = $('meF').value; if ($('meH')) ME.hora = $('meH').value; ME.local = $('meL').value;
+      ME[k] = b.dataset.v || (k === 'fecha' || k === 'asignada' ? null : ''); pinta();
+    });
+    $('meGo').onclick = () => {
+      if ($('meF')) ME.fechaVal = $('meF').value; if ($('meH')) ME.hora = $('meH').value; ME.local = $('meL').value;
+      const c = {};
+      if (ME.fecha === 'sin') c.fecha = '';
+      if (ME.fecha === 'con') { if (!ME.fechaVal) return toast('Elegí la fecha'); c.fecha = ME.fechaVal; c.hora = ME.hora || ''; }
+      if (ME.local) c.local = ME.local;
+      if (ME.asignada === 'si') c.asignada = true; if (ME.asignada === 'no') c.asignada = false;
+      if (ME.prioridad) c.prioridad = ME.prioridad;
+      if (ME.estado) c.estado = ME.estado;
+      if (!Object.keys(c).length) return toast('No elegiste ningún cambio');
+      $('meGo').disabled = true; $('meGo').textContent = 'Aplicando…';
+      llamar('webEditarMasivo', [ids, c], r => {
+        toast(r.ok ? '✏️ ' + r.msg : 'Error: ' + r.msg);
+        if (r.ok) { $('mAcc').classList.add('hide'); setSelMode(false); cargar(); } else { $('meGo').disabled = false; $('meGo').textContent = 'Aplicar'; }
+      });
+    };
+  };
+  pinta(); $('mAcc').classList.remove('hide');
+}
+$('selEdit').onclick = abrirEditarMasivo;
+
 /* ===================== Demo (solo vista previa) ===================== */
 let DEMO = null;
 function demo(fn, args) {
@@ -4074,6 +4129,7 @@ function demo(fn, args) {
   if (fn === 'webPedidoEstado') { const x = D.pedidos.find(y => y.id === args[0]); if (x) x.estado = args[1]; return { ok: true, msg: 'Pedido ' + args[1].toLowerCase() }; }
   if (fn === 'webEmpleadosLocal') { D.empleadosLocal = args[0].slice(); return { ok: true, msg: 'Vendedores guardados', empleados: args[0] }; }
   if (fn === 'webNovCheck') return { ok: true, nov: [] };
+  if (fn === 'webEditarMasivo') { const [ids, c] = args; ids.forEach(id => { const t = D.tareas.find(x => x.id === id); if (!t) return; if ('fecha' in c) { t.fecha = c.fecha; t.hora = c.hora || ''; } if (c.local) t.local = c.local; if ('asignada' in c) t.asignada = c.asignada && !(D.areasInternas || []).includes(t.local); if (c.prioridad) t.prioridad = c.prioridad; if (c.estado) t.estado = c.estado; }); return { ok: true, msg: ids.length + ' tarea(s) actualizadas (demo)' }; }
   if (fn === 'webVerComoLocal') { const d = JSON.parse(JSON.stringify(D)); d.portal = { local: args[0], usuario: 'vista_previa', nombre: 'Vista previa', dueno: 'Eduardo', permisos: { crear_tareas: true, cambiar_estado: true, comentar: true, reportar: true, proponer_temas: true, gestionar_vendedores: true } }; d.vistaPrevia = true; d.tareas = d.tareas.filter(t => t.local === args[0] && (t.asignada || t.reunion)); d.tareas.forEach(t => t.alta = ''); d.locales = [args[0]]; return d; }
   if (fn === 'webBienvenidaGuardar') { D.bienvenida.asunto = args[0]; D.bienvenida.texto = args[1]; return { ok: true, msg: 'Borrador guardado' }; }
   if (fn === 'webBienvenidaEnviar') { if (args[3]) return { ok: true, msg: 'Prueba enviada a tu mail (demo)' }; args[0].forEach(x => { const u = D.usuariosLocales.find(y => y.usuario === x); if (u) u.bienvenida = ahoraStr(); }); return { ok: true, msg: '✉️ Bienvenida enviada a ' + args[0].length + ' usuario(s) (demo)' }; }
