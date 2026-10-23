@@ -1132,7 +1132,7 @@ const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto'
 const DSEM = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'];
 const ES_DEMO = !(window.google && google.script && google.script.run);
 let ENTORNO = ''; try { ENTORNO = localStorage.getItem('tm_env') || ''; } catch (e) {}
-const WEB_VERSION = 'v1.10';
+const WEB_VERSION = 'v1.12';
 const LOGO_DEFECTO = 'https://itechgroup.com.ar/img/my-shop-logo-1623431478.jpg';
 const APP_WEB = 'trabajo';
 
@@ -1718,9 +1718,11 @@ function pintarReu() {
   ab.forEach(t => { const k = t.local || 'General'; if (!grupos[k]) { grupos[k] = []; orden.push(k); } grupos[k].push(t); });
   orden.sort((a, b) => (a === 'General' ? -1 : DATA.locales.indexOf(a) < 0 ? 98 : DATA.locales.indexOf(a)) - (b === 'General' ? -1 : DATA.locales.indexOf(b) < 0 ? 98 : DATA.locales.indexOf(b)));
   let k = 0;
-  $('rLista').innerHTML = ab.length ? '<h2 class="day reu">' + ic('chat') + (pt ? 'Temas de tu local' : 'Pendientes de hablar · por local') + ' <span class="n">' + ab.length + '</span></h2>' +
+  const jefeR = !pt && (DATA.esDueno || ES_DEMO || (ADMIN() && PERM('gestionar_reuniones')));
+  $('rLista').innerHTML = (ab.length && jefeR ? '<button class="btn main w100" id="reuProc" type="button" style="margin:6px 0 4px">📋 Procesar reunión (' + ab.length + ' temas)</button><div class="hint" style="display:block;margin-bottom:6px">Al terminar la reunión: elegís qué temas pasan a ser tareas tuyas, se borran los duplicados y a los locales se les limpia la lista.</div>' : '') +
+    (ab.length ? '<h2 class="day reu">' + ic('chat') + (pt ? 'Temas de tu local' : 'Pendientes de hablar · por local') + ' <span class="n">' + ab.length + '</span></h2>' : '') +
     orden.map(g => (orden.length > 1 || !pt ? '<div class="lochead">' + (g === 'General' ? ic('users') : badge(area({ local: g }))) + esc(g) + '<span class="n">' + grupos[g].length + '</span></div>' : '') + grupos[g].map(t => tarjeta(t, k++, false)).join('')).join('')
-    : '<div class="empty"><span class="big">🗣️</span>No hay temas pendientes. Anotá el primero arriba.</div>';
+    + (ab.length ? '' : '<div class="empty"><span class="big">🗣️</span>No hay temas pendientes. Anotá el primero arriba.</div>');
   $('rHechos').innerHTML = hb.length ? '<h2 class="day ok">' + ic('check') + 'Ya hablados <span class="n">' + hb.length + '</span></h2>' + hb.slice(0, 30).map((t, i) => tarjeta(t, i, true)).join('') : '';
 }
 function anotarTema() {
@@ -3730,10 +3732,13 @@ function fmtAlta(a) { if (!a) return ''; const d = a.slice(0, 10).split('-'); re
 
 /* ---- Modo web / modo app ---- */
 let VMODO = ''; try { VMODO = localStorage.getItem('tm_vmodo') || ''; } catch (e) {}
+try { const qm = new URLSearchParams(location.search).get('modo'); if (qm === 'app' || qm === 'web') { VMODO = qm; localStorage.setItem('tm_vmodo', qm); } } catch (e) {}
+const PANTALLA_GRANDE = () => window.innerWidth >= 900;
 if (!VMODO) VMODO = window.innerWidth >= 1024 ? 'web' : 'app';
 try { if (!localStorage.getItem('tm_v15_tabla')) { localStorage.setItem('tm_v15_tabla', '1'); vistaAg = 'tabla'; localStorage.setItem('gt_vista', 'tabla'); } } catch (e) {}
 function aplicarVistaModo() {
-  document.body.classList.toggle('web', VMODO === 'web');
+  document.body.classList.toggle('web', VMODO === 'web' && PANTALLA_GRANDE());   // v1.12: en el celular nunca modo web
+  $('btnVista').classList.toggle('hide', !PANTALLA_GRANDE());
   $('btnVista').textContent = VMODO === 'web' ? '📱' : '💻';
   $('btnVista').title = VMODO === 'web' ? 'Pasar a modo app (celular)' : 'Pasar a modo web (computadora)';
 }
@@ -3742,6 +3747,7 @@ $('btnVista').onclick = () => {
   aplicarVistaModo(); if (DATA) pintar(); toast(VMODO === 'web' ? '💻 Modo web' : '📱 Modo app');
 };
 aplicarVistaModo();
+window.addEventListener('resize', () => { clearTimeout(window._rz); window._rz = setTimeout(aplicarVistaModo, 200); });
 
 /* ---- Tabla de tareas (en el celular cada tarea queda en 3 líneas) ---- */
 let TSORT = { k: 'vence', d: 1 };
@@ -3992,6 +3998,45 @@ function abrirEditarMasivo() {
 }
 $('selEdit').onclick = abrirEditarMasivo;
 
+
+/* ===================== v1.11 · Procesar reunión ===================== */
+const normTema = x => String(x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+function abrirProcesar() {
+  const ab = temasAbiertos(), visto = {}, dup = [], unicos = [];
+  ab.slice().sort((a, b) => (a.local ? 1 : 0) - (b.local ? 1 : 0) || (a.alta || '').localeCompare(b.alta || '')).forEach(t => {
+    const k = normTema(t.desc);
+    if (visto[k]) dup.push({ t, de: visto[k] }); else { visto[k] = t; unicos.push(t); }
+  });
+  const hoy = DATA.hoy, reus = (DATA.reuniones || []).filter(r => r.fecha <= hoy && !/procesada/i.test(r.estado || '')).sort((a, b) => b.fecha.localeCompare(a.fecha));
+  const reu = reus[0] || null;
+  const grupos = {}, orden = [];
+  unicos.forEach(t => { const k = t.local || 'General'; if (!grupos[k]) { grupos[k] = []; orden.push(k); } grupos[k].push(t); });
+  orden.sort((a, b) => (a === 'General' ? -1 : DATA.locales.indexOf(a)) - (b === 'General' ? -1 : DATA.locales.indexOf(b)));
+  const ped = new Set((DATA.pedidos || []).map(x => x.tema));
+  const fila = (t, attr, on, extra) => '<label class="bvu"><input type="checkbox" ' + attr + '="' + esc(t.id) + '"' + (on ? ' checked' : '') + '><span class="tx"><b>' + esc(t.desc) + '</b><small>' + esc(t.local || 'General') + (ped.has(t.id) ? ' · 🛒 pedido de compras → va a Compras' : '') + (/alta/i.test(t.prioridad) ? ' · 🔥 Importante' : '') + (extra || '') + '</small></span></label>';
+  $('accBody').innerHTML = '<div class="grab"></div><h3 style="margin:4px 0 2px">📋 Procesar reunión' + (reu ? ' del ' + esc(fechaCorta(reu.fecha)) : '') + '</h3>' +
+    '<div class="hint" style="display:block;margin:0 0 6px">Tildados = <b>pasan a ser tareas tuyas</b> (la hago yo). Destildados = <b>no van</b>. A los locales se les limpia la lista para que anoten temas nuevos.</div>' +
+    '<div class="row" style="margin-bottom:4px"><div><button class="btn ghost w100" id="prTodos" type="button">Tildar todos</button></div><div><button class="btn ghost w100" id="prNinguno" type="button">Ninguno</button></div></div>' +
+    orden.map(g => '<div class="lochead">' + (g === 'General' ? ic('users') : badge(area({ local: g }))) + esc(g) + '<span class="n">' + grupos[g].length + '</span></div>' + grupos[g].map(t => fila(t, 'data-pr', true)).join('')).join('') +
+    (dup.length ? '<div class="lochead" style="margin-top:16px">🗑️ Duplicados (se borran)<span class="n">' + dup.length + '</span></div><div class="hint" style="display:block;margin:0 0 4px">Destildá si alguno NO es repetido.</div>' + dup.map(d => fila(d.t, 'data-prdup', true, ' · igual a "' + esc(d.de.desc.slice(0, 40)) + '" (' + esc(d.de.local || 'General') + ')').replace('data-prdup="' + esc(d.t.id) + '"', 'data-prdup="' + esc(d.t.id) + '" data-de="' + esc(d.de.id) + '"')).join('') : '') +
+    '<div class="row" style="margin-top:16px"><div><button class="btn sec w100" id="accCan" type="button">Cancelar</button></div><div><button class="btn ok w100" id="prGo" type="button">📋 Procesar</button></div></div>';
+  $('mAcc').classList.remove('hide');
+  $('prTodos').onclick = () => $('accBody').querySelectorAll('[data-pr]').forEach(c => c.checked = true);
+  $('prNinguno').onclick = () => $('accBody').querySelectorAll('[data-pr]').forEach(c => c.checked = false);
+  $('prGo').onclick = e => {
+    const tareas = [], descartar = [], duplicados = [];
+    $('accBody').querySelectorAll('[data-pr]').forEach(c => (c.checked ? tareas : descartar).push(c.dataset.pr));
+    $('accBody').querySelectorAll('[data-prdup]').forEach(c => { if (c.checked) duplicados.push({ id: c.dataset.prdup, de: c.dataset.de }); else tareas.push(c.dataset.prdup); });
+    if (!confirmarDoble(e.currentTarget, 'Tocá otra vez: ' + tareas.length + ' a tus tareas · ' + descartar.length + ' no van · ' + duplicados.length + ' duplicados')) return;
+    $('prGo').disabled = true; $('prGo').textContent = 'Procesando…';
+    llamar('webProcesarReunion', [{ reunion: reu ? reu.id : '', tareas, descartar, duplicados }], r => {
+      toast(r.ok ? '📋 ' + r.msg : 'Error: ' + r.msg);
+      if (r.ok) { $('mAcc').classList.add('hide'); confeti($('rLista')); cargar(); } else { $('prGo').disabled = false; $('prGo').textContent = '📋 Procesar'; }
+    });
+  };
+}
+document.addEventListener('click', e => { if (e.target.closest('#reuProc')) abrirProcesar(); });
+
 /* ===================== Demo (solo vista previa) ===================== */
 let DEMO = null;
 function demo(fn, args) {
@@ -4129,6 +4174,7 @@ function demo(fn, args) {
   if (fn === 'webPedidoEstado') { const x = D.pedidos.find(y => y.id === args[0]); if (x) x.estado = args[1]; return { ok: true, msg: 'Pedido ' + args[1].toLowerCase() }; }
   if (fn === 'webEmpleadosLocal') { D.empleadosLocal = args[0].slice(); return { ok: true, msg: 'Vendedores guardados', empleados: args[0] }; }
   if (fn === 'webNovCheck') return { ok: true, nov: [] };
+  if (fn === 'webProcesarReunion') { const q = args[0]; let n = 0; q.tareas.forEach(id => { const t = D.tareas.find(x => x.id === id); if (!t) return; n++; D.tareas.push(Object.assign({}, t, { id: 'T9' + (100 + n), tipo: 'Tarea', reunion: false, local: t.local || 'Supervisión', notas: 'De la reunión' })); }); const cerr = q.tareas.concat(q.descartar, q.duplicados.map(d => d.id)); D.tareas = D.tareas.filter(t => !cerr.includes(t.id)); return { ok: true, msg: n + ' tema(s) pasaron a tus tareas · ' + q.descartar.length + ' no van · ' + q.duplicados.length + ' duplicado(s) borrados (demo)' }; }
   if (fn === 'webEditarMasivo') { const [ids, c] = args; ids.forEach(id => { const t = D.tareas.find(x => x.id === id); if (!t) return; if ('fecha' in c) { t.fecha = c.fecha; t.hora = c.hora || ''; } if (c.local) t.local = c.local; if ('asignada' in c) t.asignada = c.asignada && !(D.areasInternas || []).includes(t.local); if (c.prioridad) t.prioridad = c.prioridad; if (c.estado) t.estado = c.estado; }); return { ok: true, msg: ids.length + ' tarea(s) actualizadas (demo)' }; }
   if (fn === 'webVerComoLocal') { const d = JSON.parse(JSON.stringify(D)); d.portal = { local: args[0], usuario: 'vista_previa', nombre: 'Vista previa', dueno: 'Eduardo', permisos: { crear_tareas: true, cambiar_estado: true, comentar: true, reportar: true, proponer_temas: true, gestionar_vendedores: true } }; d.vistaPrevia = true; d.tareas = d.tareas.filter(t => t.local === args[0] && (t.asignada || t.reunion)); d.tareas.forEach(t => t.alta = ''); d.locales = [args[0]]; return d; }
   if (fn === 'webBienvenidaGuardar') { D.bienvenida.asunto = args[0]; D.bienvenida.texto = args[1]; return { ok: true, msg: 'Borrador guardado' }; }
